@@ -1,0 +1,278 @@
+project:
+  timezone: Europe/London
+  # First line in Telegram messages (optional). Set to your channel style.
+  telegram_alert_header: "🇬🇧 UK Amazon warehouse jobs alert"
+sources:
+  # Public Amazon job search pages.
+  # Replace/add URLs as needed. Keep them public (no employee-only systems).
+  urls:
+    # Targeted Amazon Jobs searches (fast HTTP polling)
+    - "https://www.amazon.jobs/en/search?country=GBR&base_query=warehouse&loc_query=Coventry%2C%20UK"
+    - "https://www.amazon.jobs/en/search?country=GBR&base_query=warehouse&loc_query=Northampton%2C%20UK"
+    - "https://www.amazon.jobs/en/search?country=GBR&base_query=warehouse&loc_query=Derby%2C%20UK"
+
+    # Optional: jobsatamazon.co.uk detail pages (Playwright rendering)
+    - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000449"
+    - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000185"
+    - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000214"
+    # Nottingham/Mansfield (warehouse operative)
+    - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000340"
+
+filters:
+  # Midlands / adjacent UK warehouse areas plus Nottingham–Mansfield.
+  location_keywords:
+    - "Coventry"
+    - "Northampton"
+    - "Derby"   
+    - "Nottingham"
+    - "Mansfield"
+    - "Rugby"
+    - "Leicester"
+
+  # Amazon warehouse/hourly style keywords (case-insensitive).
+  title_keywords_any:
+    - "warehouse"
+    - "fulfilment"
+    - "fulfillment"
+    - "sort"
+    - "associate"
+    - "operative"
+    - "picker"
+    - "packer"
+    - "stower"
+    - "amazon"
+
+  # Optional: exclude certain titles.
+  # title_keywords_none:
+  #   - "manager"
+  #   - "engineering"
+  #   - "software"
+  #   - "corporate"
+
+  # Minimum hourly pay (GBP). Only applied when pay is visible.
+  min_pay_gbp_per_hour: 0
+
+# ``/setlocation`` inline keyboard = distinct ``jobs.location`` values from SQLite (what you have seen).
+# ``alert_locations`` below is optional legacy: only used if a subscriber still has an old preset name saved
+# (no ``location_match_substr`` row). You can trim or remove ``alert_locations`` if you rely only on DB buttons.
+alert_locations:
+  - name: "Milton Keynes"
+    keywords: ["milton keynes", "mk1", "mk2", "mk6"]
+  - name: "Coventry"
+    keywords: ["coventry", "cv1", "cv2"]
+  - name: "Luton"
+    keywords: ["luton", "lu1", "lu2"]
+  - name: "Rugeley"
+    keywords: ["rugeley", "ws15"]
+  - name: "Northampton"
+    keywords: ["northampton", "nn1", "nn3"]
+
+setlocation:
+  exclude_from_menu:
+    - Croydon
+    - Birmingham
+    - Manchester
+    - Leeds
+    - Sheffield
+    - Dartford
+
+# Subscriber onboarding: /start welcome, 1-day free trial on Subscribe button, expiry reminder.
+subscription:
+  trial_duration_hours: 24
+  reference_grant_hours: 72
+  reference_grant_user_message: "Ahhaha — you are special to the admin. You get temporary free alerts. Enjoy, huh! 🎉"
+  reminder_hours_before_expiry: 1
+  final_reminder_minutes_before_expiry: 20
+  trial_ending_minutes_before_expiry: 1
+  reminder_1h_body: "📦 Amazon UK warehouse roles fill up fast. Stay subscribed so you're the first to know — work smart and stay two steps ahead of the crowd."
+  trial_ending_body: "You have not subscribed to a paid plan — alerts will stop automatically when the trial ends and you will not receive job notifications after that. Tap Subscribe below to keep getting alerts."
+  trial_repeat_blocked_body: "Your 1-day free trial has already been used and has ended. Please buy a subscription below to continue receiving job and shift alerts."
+  # stripe_links = real Stripe checkout (no Telegram "Checkout Test").
+  # Paste your Payment Link from Stripe Dashboard → Payment links → each plan.
+  # After payment, set Stripe redirect to: https://t.me/YOUR_BOT_USERNAME?start=paid_15d (change plan id).
+  payment_mode: stripe_links
+  paid_plans:
+    - id: "1d"
+      button_label: "1 day payment — £2.25"
+      days: 1
+      price_gbp: 2.25
+      stripe_url: "https://buy.stripe.com/aFaeVe3ex9ir8eBcT6ak001"
+      invoice_title: "Amazon UK Alerts — 1 day"
+      invoice_description: "Job + shift Telegram alerts for 1 day."
+    - id: "15d"
+      button_label: "15 day payment — £35"
+      days: 15
+      price_gbp: 35
+      stripe_url: "https://buy.stripe.com/7sYbJ23ex0LV66t2esak002"
+      invoice_title: "Amazon UK Alerts — 15 days"
+      invoice_description: "Job + shift Telegram alerts for 15 days."
+    - id: "30d"
+      button_label: "1 month — £50"
+      days: 30
+      price_gbp: 50
+      stripe_url: "https://buy.stripe.com/14A4gA7uN1PZeCZcT6ak003"
+      invoice_title: "Amazon UK Alerts — 1 month"
+      invoice_description: "Job + shift Telegram alerts for 30 days."
+  paid_subscription_days: 30
+  paid_price_gbp: 50
+  reminder_check_interval_seconds: 60
+  welcome_locations_limit: 12
+
+behavior:
+  # If true, alert when a previously-seen listing changes (title/location/pay/shift/url).
+  alert_on_updates: true
+
+  # Max jobs to parse per source page per poll (safety)
+  max_items_per_source: 80
+
+  # Save raw HTML snapshots when parsing finds zero jobs or errors occur
+  save_snapshots_on_parse_issues: true
+
+  # `jobsatamazon.co.uk` is a dynamic site; enable Playwright rendering for those URLs.
+  # Keep `amazon.jobs` on fast httpx polling.
+  use_playwright_for_jobsatamazon: true
+
+  # jobsatamazon.co.uk: only Telegram when Apply is ON and we detected it (recommended for shift drops).
+  # amazon.jobs listings: still alerted (this site path does not expose the same Apply flag).
+  alert_only_when_apply_enabled: true
+
+  # Capture JSON network responses while rendering jobsatamazon.co.uk (often contains schedule/pay fields).
+  capture_jobsatamazon_network_json: true
+
+  # Emoji reactions on bot alerts → forwarded to TELEGRAM_CHAT_ID (you)
+  notify_admin_on_message_reaction: true
+
+# --- Optional: authenticated Amazon Candidate Self Service shift watcher ---
+# Separate from job listing polling (`python -m app.main`). Does not change job alerts.
+# 1) Set schedule_url to the page you want Playwright to open (often jobsatamazon “My jobs” dashboard
+#    with #/myApplications, or the legacy self-service available-schedule URL).
+# 2) Save session: python -m app.shift_alert login
+#    Example: python -m app.shift_alert login --storage-state data/amazon_shift_session.json
+#    Multiple accounts: use different session files, e.g.
+#      python -m app.shift_alert login --storage-state data/amazon_shift_person_a.json
+#      python -m app.shift_alert run --storage-state data/amazon_shift_person_a.json
+#    (Dedupe state defaults to data/amazon_shift_person_a.shift_state.json next to that file.)
+#    Optional: set SHIFT_ALERT_STORAGE_STATE / SHIFT_ALERT_STATE_PATH in .env (CLI flags override).
+# 3) Set enabled: true, then: python -m app.shift_alert run [--storage-state ...]
+# Broadcast test photo to all subscribers: python -m app.shift_alert test-photo [--image screenshot.png]
+# Multi-account: add profiles (each id needs schedule_url + storage_state_path). Empty profiles = use flat schedule_url below.
+# Direct schedule-picker URL (skips My jobs → Select Shift): use selfservice/available-schedule/… per profile.
+#   profiles:
+#     - id: hamza-nottingham
+#       display_name: "Hamza · Nottingham"
+#       schedule_url: "https://www.jobsatamazon.co.uk/selfservice/schedule/available-schedule/UUID/JOB-UK-0000000340"
+#       storage_state_path: "data/shift_hamza.json"
+#       enabled: true
+shift_alert:
+  enabled: true
+  profiles: []
+  # Direct UK application tracking / shift-selection dashboard (login + run both use this).
+  # My jobs dashboard — works after credential change (no fixed applicationId; avoids Access denied / Application error).
+  # Bot opens this after login, then clicks Select Shift on your active application card.
+  schedule_url: "https://www.jobsatamazon.co.uk/app#/myApplications"
+  login_url: "https://www.jobsatamazon.co.uk/login"
+  login_start_url: "https://www.jobsatamazon.co.uk/app#/myApplications"
+  # Use www host (above). Apex jobsatamazon.co.uk without www often loops with auth after OTP.
+  storage_state_path: "data/amazon_shift_session.json"
+  state_path: "data/shift_alert_state.json"
+  # Seconds between full poll cycles (random in [min, max]). Each Playwright run still takes several seconds.
+  poll_interval_min_seconds: 30
+  poll_interval_max_seconds: 60
+  # MutationObserver window on the open dashboard (no page.goto every poll). 0 = auto from poll max (min 5s).
+  dom_watch_enabled: true
+  dom_watch_timeout_seconds: 0
+  # Turbo: faster polls during drop windows (project timezone). Thursday 16:00–17:00 UK by default.
+  turbo_enabled: true
+  turbo_windows:
+    - weekday: 3
+      hour_start: 16
+      hour_end: 17
+      poll_interval_min_seconds: 8
+      poll_interval_max_seconds: 20
+      dom_watch_timeout_seconds: 18
+  # Heads up Telegram when page fingerprint changes (before full shift-open alert).
+  pre_alert_on_fingerprint_change: true
+  pre_alert_cooldown_seconds: 180
+  # Re-save session cookies every 24h (visit schedule_url while signed in).
+  session_refresh_hours: 24
+  # Persistent Select Shift clicking (always on, or only during turbo via select_shift_aggressive_in_turbo).
+  # aggressive_select_shift: false
+  select_shift_click_attempts: 3
+  select_shift_aggressive_attempts: 8
+  select_shift_aggressive_in_turbo: true
+  page_ready_timeout_ms: 20000
+  deep_page_ready_timeout_ms: 15000
+  # Default off: Telegram only when shifts actually open. Set true for extra "page changed" text (often noisy on SPAs).
+  # alert_on_fingerprint_change: false
+  # Seconds between multiple profiles in one cycle (default 0 in code if omitted).
+  # profile_stagger_seconds: 0
+  # Match the line under your active application card (case-insensitive substring).
+  empty_state_substrings:
+    - "we do not have any schedules matching"
+    - "no shifts available at this time"
+    - "no shifts available"
+  # SPA markers — exit the ready-wait as soon as one appears (faster than sleeping to timeout).
+  page_ready_substrings:
+    - "my jobs"
+    - "application"
+    - "job opportunities"
+    - "job-opportunities"
+    - "no shifts available"
+    - "select shift"
+    - "we do not have any schedules"
+  poll_select_shift_for_deep_check: true
+  deep_no_schedule_substrings:
+    - "you currently do not have a schedule or start date selected"
+    - "no schedule yet"
+  deep_shift_available_substrings:
+    - "shift pattern"
+    - "save and continue"
+    - "choose your shift"
+    - "available shifts"
+    - "week 1"
+    - "week 2"
+  # Do not alert when CDN/WAF returns block HTML (false positive "shifts open").
+  # If logs say "Matched phrase: …" but the page is really My jobs, remove that phrase here (often "request blocked").
+  # Do not use bare "403 error" — My jobs SPA often contains that string in scripts (false block).
+  blocked_page_substrings:
+    - "generated by cloudfront"
+    - "request could not be satisfied"
+    # Amazon "Access denied" / wrong application link (not a real shift-open page)
+    - "access denied"
+    - "not authorized to view"
+    - "you can not access this application"
+    - "error-404"
+    - "application error"
+    - "something went wrong"
+  # 24/7 in project timezone: all calendar days, hours 0–24 (end exclusive).
+  active_weekdays_only: false
+  active_hour_start: 0
+  active_hour_end: 24
+  # If run crashes with "Target page, context or browser has been closed", try false (visible Chrome) or install: playwright install chrome
+  playwright_headless: false
+  # Optional: fixed site/city line in Telegram (overrides profile display_name for the caption).
+  # alert_location: "Nottingham fulfilment centre"
+  # Playwright + Perplexity Comet often fails with net::ERR_ABORTED — use Chrome for login/run.
+  # `login` uses a Chrome-like User-Agent + UK locale and the same AutomationControlled flag as `run`,
+  # but not ignore_default_args (that combo can break typing on jobsatamazon).
+  playwright_browser_channel: "chrome"
+  # Comet path (only if you remove browser_channel; many forks abort navigation under automation):
+  # playwright_executable_path: "C:\\Users\\Development\\AppData\\Local\\Perplexity\\Comet\\Application\\comet.exe"
+  playwright_executable_path:
+  navigation_timeout_ms: 60000
+  # Screenshot per-attempt timeout (ms). Increase if logs show Page.screenshot timeout after "fonts loaded".
+  # screenshot_timeout_ms: 70000
+  # Smart peak timing (admin-only): records each successful shift alert in SQLite shift_analytics.
+  # TELEGRAM_CHAT_ID gets a warning 5–10 min before learned peak times; /admin → Get Peak Times.
+  peak_prediction_enabled: true
+  peak_prediction_lead_minutes_min: 5
+  peak_prediction_lead_minutes_max: 10
+  peak_prediction_min_samples: 3
+  peak_prediction_min_slot_count: 2
+  peak_prediction_check_interval_seconds: 60
+  alert_title: "Amazon UK — shifts are open"
+  # When deep_slots (schedule picker) fires: send 3 photos in a row (~450ms apart) for extra phone vibrations.
+  high_confidence_alert_repeat_count: 3
+  high_confidence_alert_repeat_delay_ms: 450
+  # Optional: full User-Agent from chrome://version (login only) if auth.hiring.amazon.com rejects "send code".
+  # login_user_agent: ""

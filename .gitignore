@@ -1,0 +1,43 @@
+# Secrets (keep .env.local for machine-only overrides)
+.env
+.env.local
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+ENV/
+
+# Project runtime data (local only)
+data/jobs.db
+data/snapshots/
+logs/
+
+# Shift watcher: Playwright cookies + dedupe state (never commit)
+data/amazon_shift*.json
+data/*.shift_state.json
+data/**/*.shift_state.json
+data/shift_alert_state.json
+data/shift_alert_dry_run_*.png
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Tests / tooling
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Misc
+Untitled

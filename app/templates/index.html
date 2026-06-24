@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<p class="text-slate-600 mb-6">Local day boundaries use timezone <span class="font-mono">{{ timezone_note }}</span> (from <code class="text-xs bg-slate-200 px-1 rounded">config.yaml</code>).</p>
+{% if not track_alerts %}
+<p class="text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm mb-6">
+  The <code class="font-mono">jobs</code> table has no <code class="font-mono">notified</code> column yet, so &ldquo;Alerts sent&rdquo; stays 0 and alert columns show &ldquo;n/a&rdquo;. Add <code class="font-mono">notified INTEGER</code> (and set it from the poller) to enable alert stats.
+</p>
+{% endif %}
+
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+  <div class="bg-white rounded-lg shadow p-5 border border-slate-200">
+    <p class="text-sm text-slate-500">Jobs today</p>
+    <p id="card-jobs-today" class="text-3xl font-bold text-blue-900">{{ summary.jobs_today }}</p>
+  </div>
+  <div class="bg-white rounded-lg shadow p-5 border border-slate-200">
+    <p class="text-sm text-slate-500">Jobs this week</p>
+    <p id="card-jobs-week" class="text-3xl font-bold text-blue-800">{{ summary.jobs_week }}</p>
+  </div>
+  <div class="bg-white rounded-lg shadow p-5 border border-slate-200">
+    <p class="text-sm text-slate-500">Alerts sent (today)</p>
+    <p id="card-alerts-today" class="text-3xl font-bold text-blue-700">{{ summary.alerts_today }}</p>
+  </div>
+  <div class="bg-white rounded-lg shadow p-5 border border-slate-200">
+    <p class="text-sm text-slate-500">Subscribers</p>
+    <p id="card-subscribers" class="text-3xl font-bold text-blue-600">{{ summary.active_subscribers }}</p>
+  </div>
+</div>
+
+<h2 class="text-lg font-semibold mb-3">Recent jobs (50)</h2>
+<div class="overflow-x-auto bg-white rounded-lg shadow border border-slate-200 mb-10">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-100 text-left text-slate-600">
+      <tr>
+        <th class="px-3 py-2">Title</th>
+        <th class="px-3 py-2">Location</th>
+        <th class="px-3 py-2">Pay</th>
+        <th class="px-3 py-2">Type</th>
+        <th class="px-3 py-2">First seen</th>
+        <th class="px-3 py-2">Alerted?</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for r in recent %}
+      <tr class="hover:bg-slate-50">
+        <td class="px-3 py-2 max-w-xs truncate">
+          <a href="{{ r.source_url }}" class="text-blue-700 hover:underline" target="_blank" rel="noopener">{{ r.title }}</a>
+        </td>
+        <td class="px-3 py-2 whitespace-nowrap">{{ r.location }}</td>
+        <td class="px-3 py-2 whitespace-nowrap">{{ r.pay }}</td>
+        <td class="px-3 py-2 whitespace-nowrap text-slate-600">{{ r.type }}</td>
+        <td class="px-3 py-2 whitespace-nowrap font-mono text-xs">{{ r.first_seen }}</td>
+        <td class="px-3 py-2 text-center">
+          {% if r.notified is none %}
+          <span class="text-slate-400" title="Not stored">n/a</span>
+          {% elif r.notified == 1 %}
+          <span class="text-green-600 font-bold" title="Notified">&#10003;</span>
+          {% else %}
+          <span class="text-slate-400">&mdash;</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="px-3 py-8 text-center text-slate-500">No job rows yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="bg-slate-100 rounded-lg px-4 py-3 text-slate-800">
+  <p id="last-poll-line" class="font-medium">{{ last_poll_label }}</p>
+</div>
+
+<script>
+  async function refreshSummary() {
+    try {
+      const res = await fetch('/api/summary');
+      if (!res.ok) return;
+      const j = await res.json();
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set('card-jobs-today', j.jobs_today);
+      set('card-jobs-week', j.jobs_week);
+      set('card-alerts-today', j.alerts_today);
+      set('card-subscribers', j.active_subscribers);
+      const lp = document.getElementById('last-poll-line');
+      if (lp && j.last_poll_minutes_ago !== null && j.last_poll_minutes_ago !== undefined) {
+        const m = j.last_poll_minutes_ago;
+        lp.textContent = m === 0 ? 'Last poll: just now' : (m === 1 ? 'Last poll: 1 minute ago' : `Last poll: ${m} minutes ago`);
+      } else if (lp) {
+        lp.textContent = 'No job rows yet (never polled into this DB)';
+      }
+    } catch (e) {}
+  }
+  setInterval(refreshSummary, 60000);
+</script>
+{% endblock %}

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}All jobs{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-2">Job list</h1>
+{% if not track_alerts %}
+<p class="text-sm text-amber-800 mb-4">Alert filter is inactive until a <code class="font-mono">notified</code> column exists on <code class="font-mono">jobs</code>.</p>
+{% endif %}
+
+<form method="get" class="bg-white rounded-lg shadow border border-slate-200 p-4 mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 items-end">
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">Title contains</label>
+    <input name="title" value="{{ title }}" class="w-full border rounded px-2 py-1 text-sm" placeholder="LIKE search">
+  </div>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">Location contains</label>
+    <input name="location" value="{{ location }}" class="w-full border rounded px-2 py-1 text-sm" placeholder="LIKE search">
+  </div>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">Source (exact)</label>
+    <input name="source" value="{{ source }}" class="w-full border rounded px-2 py-1 text-sm font-mono text-xs" placeholder="e.g. jobsatamazon.co.uk" title="Filled when you click a chart on Stats">
+  </div>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">Alerted</label>
+    <select name="alerted" class="w-full border rounded px-2 py-1 text-sm" {% if not track_alerts %}disabled{% endif %}>
+      <option value="all" {% if alerted == 'all' %}selected{% endif %}>All</option>
+      <option value="yes" {% if alerted == 'yes' %}selected{% endif %}>Yes</option>
+      <option value="no" {% if alerted == 'no' %}selected{% endif %}>No</option>
+    </select>
+  </div>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">First seen within</label>
+    <select name="days" class="w-full border rounded px-2 py-1 text-sm">
+      <option value="7" {% if days == '7' %}selected{% endif %}>7 days</option>
+      <option value="14" {% if days == '14' %}selected{% endif %}>14 days</option>
+      <option value="30" {% if days == '30' %}selected{% endif %}>30 days</option>
+      <option value="all" {% if days == 'all' %}selected{% endif %}>All time</option>
+    </select>
+  </div>
+  <div class="xl:col-span-6">
+    <button type="submit" class="bg-blue-700 text-white text-sm px-4 py-2 rounded hover:bg-blue-800">Apply</button>
+  </div>
+</form>
+
+<p class="text-slate-600 mb-3"><span class="font-semibold">{{ total }}</span> matching row(s) · Page {{ page }} of {{ total_pages }}</p>
+
+<div class="overflow-x-auto bg-white rounded-lg shadow border border-slate-200">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-100 text-left text-slate-600">
+      <tr>
+        <th class="px-3 py-2">Title</th>
+        <th class="px-3 py-2">Location</th>
+        <th class="px-3 py-2">Pay</th>
+        <th class="px-3 py-2">Type</th>
+        <th class="px-3 py-2">First seen</th>
+        <th class="px-3 py-2">Alerted?</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for r in rows %}
+      <tr class="hover:bg-slate-50">
+        <td class="px-3 py-2 max-w-xs truncate">
+          <a href="{{ r.source_url }}" class="text-blue-700 hover:underline" target="_blank" rel="noopener">{{ r.title }}</a>
+        </td>
+        <td class="px-3 py-2 whitespace-nowrap">{{ r.location }}</td>
+        <td class="px-3 py-2 whitespace-nowrap">{{ r.pay }}</td>
+        <td class="px-3 py-2 whitespace-nowrap text-slate-600">{{ r.type }}</td>
+        <td class="px-3 py-2 whitespace-nowrap font-mono text-xs">{{ r.first_seen }}</td>
+        <td class="px-3 py-2 text-center">
+          {% if r.notified is none %}
+          <span class="text-slate-400">n/a</span>
+          {% elif r.notified == 1 %}
+          <span class="text-green-600 font-bold">&#10003;</span>
+          {% else %}
+          <span class="text-slate-400">&mdash;</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="px-3 py-8 text-center text-slate-500">No rows.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if total_pages > 1 %}
+<nav class="mt-6 flex gap-2 flex-wrap text-sm">
+  {% for p in range(1, total_pages + 1) %}
+    {% if p == page %}
+      <span class="px-3 py-1 rounded bg-blue-900 text-white">{{ p }}</span>
+    {% else %}
+      <a class="px-3 py-1 rounded border border-slate-300 hover:bg-slate-100"
+         href="/jobs?{{ {'page': p, 'title': title, 'location': location, 'source': source, 'alerted': alerted, 'days': days}|urlencode }}">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+</nav>
+{% endif %}
+{% endblock %}

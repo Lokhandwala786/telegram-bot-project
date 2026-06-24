@@ -1,0 +1,40 @@
+{
+  "data": {
+    "getJobDetails": {
+      "jobId": "JOB-UK-0000034521",
+      "title": "Warehouse Operative",
+      "jobType": "PART_TIME",
+      "employmentType": "Seasonal",
+      "scheduleType": "Part-Time",
+      "description": "Pick, pack and ship parcels",
+      "location": {
+        "city": "Bognor Regis",
+        "state": "England",
+        "postalCode": "PO22 9FJ",
+        "countryCode": "GBR"
+      },
+      "compensation": {
+        "currencyCode": "GBP",
+        "minPay": 14.3,
+        "maxPay": 14.3,
+        "payPeriod": "HOURLY",
+        "displayCompensation": "£14.30 /hr"
+      },
+      "jobSchedule": {
+        "hoursPerWeek": 20,
+        "scheduleText": "Fri, Sat, Sun, Mon, Tue 9:00 - 13:00",
+        "shiftType": "DAY",
+        "daysOfWeek": ["FRIDAY", "SATURDAY", "SUNDAY", "MONDAY", "TUESDAY"]
+      },
+      "startDate": "2026-05-15",
+      "firstDayOnSite": "2026-05-15",
+      "applyState": {
+        "isApplyEnabled": true,
+        "applyUrl": "https://www.jobsatamazon.co.uk/app#/apply?jobId=JOB-UK-0000034521",
+        "applyMethod": "DIRECT"
+      },
+      "jobStatus": "ACTIVE",
+      "numberOfOpenings": 1
+    }
+  }
+}

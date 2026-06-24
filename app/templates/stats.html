@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+{% block title %}Stats & insights{% endblock %}
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+{% block content %}
+<script type="application/json" id="stats-bootstrap">{{ stats_payload|tojson }}</script>
+
+<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+  <div>
+    <h1 class="text-2xl font-bold">Trends & insights</h1>
+    <p class="text-sm text-slate-600 mt-1">Charts use <span class="font-mono">first_seen_utc</span> (UTC date on axis). Click bars or doughnut slices to open the job list filtered.</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    <label class="text-sm text-slate-600">Window</label>
+    <select id="stats-days" class="border rounded px-2 py-1.5 text-sm bg-white">
+      <option value="7">7 days</option>
+      <option value="14">14 days</option>
+      <option value="30">30 days</option>
+    </select>
+    <button type="button" id="stats-refresh" class="bg-blue-700 text-white text-sm px-3 py-1.5 rounded hover:bg-blue-800">Refresh</button>
+    <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+      <input type="checkbox" id="stats-autorefresh" class="rounded">
+      Auto (90s)
+    </label>
+  </div>
+</div>
+
+{% if not track_alerts %}
+<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-4">Alert rate stays at 0% until a <code class="font-mono">notified</code> column exists on <code class="font-mono">jobs</code>.</p>
+{% endif %}
+
+<p id="stats-status" class="text-xs text-slate-500 mb-4"></p>
+
+<div id="insight-cards" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8"></div>
+
+<div class="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden mb-8">
+  <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 text-sm font-semibold text-slate-700">Source mix (same window)</div>
+  <div class="p-4 overflow-x-auto">
+    <table class="min-w-full text-sm" id="source-split-table">
+      <thead><tr class="text-left text-slate-500 border-b"><th class="py-2 pr-4">Source</th><th class="py-2 pr-4">Jobs</th><th class="py-2 pr-4">%</th><th class="py-2">Drill-down</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-4">
+  <div class="bg-white rounded-lg shadow border border-slate-200 p-4">
+    <div class="flex justify-between items-start mb-2">
+      <h2 class="text-sm font-semibold text-slate-700">Jobs per day</h2>
+      <span class="text-[10px] uppercase tracking-wide text-slate-400">hover for detail</span>
+    </div>
+    <div class="relative h-[300px] w-full"><canvas id="chartDays"></canvas></div>
+  </div>
+  <div class="bg-white rounded-lg shadow border border-slate-200 p-4">
+    <div class="flex justify-between items-start mb-2">
+      <h2 class="text-sm font-semibold text-slate-700">Alert rate (% of rows / day)</h2>
+      <span class="text-[10px] uppercase tracking-wide text-slate-400">hover for %</span>
+    </div>
+    <div class="relative h-[300px] w-full"><canvas id="chartAlert"></canvas></div>
+  </div>
+  <div class="bg-white rounded-lg shadow border border-slate-200 p-4">
+    <h2 class="text-sm font-semibold text-slate-700 mb-2">Top locations <span class="font-normal text-slate-400">(click bar)</span></h2>
+    <div class="relative h-[320px] w-full"><canvas id="chartLoc"></canvas></div>
+  </div>
+  <div class="bg-white rounded-lg shadow border border-slate-200 p-4">
+    <h2 class="text-sm font-semibold text-slate-700 mb-2">By source <span class="font-normal text-slate-400">(click slice)</span></h2>
+    <div class="relative h-[300px] w-full max-w-md mx-auto"><canvas id="chartType"></canvas></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const blues = ['#1e3a8a', '#1e40af', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe'];
+  let charts = [];
+  let autoTimer = null;
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  }
+
+  function destroyCharts() {
+    charts.forEach(c => { try { c.destroy(); } catch (e) {} });
+    charts = [];
+  }
+
+  function jobsLink(params) {
+    const q = new URLSearchParams(params);
+    return '/jobs?' + q.toString();
+  }
+
+  function encodeLoc(loc) {
+    if (loc === '(blank)') return { location: '__blank__' };
+    return { location: loc };
+  }
+
+  function encodeSrc(src) {
+    if (src === '(blank)') return { source: '__blank__' };
+    return { source: src };
+  }
+
+  function renderInsights(ins, trendDays) {
+    const el = document.getElementById('insight-cards');
+    if (!el) return;
+    const cards = [
+      ['Jobs in window', ins.jobs_in_window, 'first_seen in selected range'],
+      ['Avg / day', ins.avg_jobs_per_day, 'window length ' + trendDays + 'd'],
+      ['Distinct locations', ins.distinct_locations, 'unique location strings'],
+      ['Busiest day', ins.busiest_day ? (esc(String(ins.busiest_day)) + ' · ' + ins.busiest_day_count) : '—', 'max count on axis'],
+    ];
+    el.innerHTML = cards.map(([t, v, sub]) =>
+      `<div class="bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
+        <p class="text-xs text-slate-500 uppercase tracking-wide">${esc(t)}</p>
+        <p class="text-2xl font-bold text-blue-900 mt-1">${v}</p>
+        <p class="text-[11px] text-slate-400 mt-1">${esc(sub)}</p>
+      </div>`
+    ).join('');
+
+    const tb = document.querySelector('#source-split-table tbody');
+    if (tb && Array.isArray(ins.source_split)) {
+      tb.innerHTML = ins.source_split.map(row => {
+        const p = { days: String(Math.min(30, Math.max(7, trendDays))), source: row.label === '(blank)' ? '__blank__' : row.label };
+        const href = jobsLink(p);
+        return `<tr class="border-b border-slate-100 hover:bg-slate-50">
+          <td class="py-2 pr-4 font-mono text-xs">${esc(row.label)}</td>
+          <td class="py-2 pr-4">${row.count}</td>
+          <td class="py-2 pr-4">${row.pct}%</td>
+          <td class="py-2"><a class="text-blue-700 hover:underline" href="${href}">Open jobs</a></td>
+        </tr>`;
+      }).join('');
+      if (!ins.source_split.length) {
+        tb.innerHTML = '<tr><td colspan="4" class="py-4 text-slate-500">No rows in window.</td></tr>';
+      }
+    }
+  }
+
+  function renderAll(data) {
+    destroyCharts();
+    const L = data.labels_days || [];
+    const hasDays = L.length > 0;
+    const commonInteraction = { intersect: false, mode: 'index' };
+
+    renderInsights(data.insights || {}, data.trend_days || 14);
+
+    if (hasDays) {
+      const ctxD = document.getElementById('chartDays');
+      charts.push(new Chart(ctxD, {
+        type: 'bar',
+        data: {
+          labels: L,
+          datasets: [{ label: 'Jobs', data: data.counts_days || [], backgroundColor: '#3b82f6', borderRadius: 4 }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: commonInteraction,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const n = ctx.parsed.y;
+                  const tot = data.insights && data.insights.jobs_in_window;
+                  return (n != null ? n + ' jobs' : '') + (tot != null ? ' · window total ' + tot : '');
+                }
+              }
+            }
+          },
+          scales: { x: { ticks: { maxRotation: 45, minRotation: 0 } }, y: { beginAtZero: true, ticks: { precision: 0 } } }
+        }
+      }));
+
+      const ctxA = document.getElementById('chartAlert');
+      charts.push(new Chart(ctxA, {
+        type: 'line',
+        data: {
+          labels: L,
+          datasets: [{ label: '% notified', data: data.alert_pct || [], borderColor: '#1e40af', backgroundColor: 'rgba(37,99,235,0.12)', fill: true, tension: 0.25, pointRadius: 3 }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: commonInteraction,
+          plugins: { tooltip: { callbacks: { label: (c) => (c.parsed.y != null ? c.parsed.y.toFixed(1) + '% notified' : '') } } },
+          scales: { x: { ticks: { maxRotation: 45 } }, y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } }
+        }
+      }));
+    }
+
+    const locL = data.loc_labels || [];
+    const locC = data.loc_counts || [];
+    if (locL.length) {
+      const ctxL = document.getElementById('chartLoc');
+      const ch = new Chart(ctxL, {
+        type: 'bar',
+        data: {
+          labels: locL,
+          datasets: [{ label: 'Count', data: locC, backgroundColor: '#2563eb', borderRadius: 2 }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          plugins: { legend: { display: false } },
+          scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+          onClick: (e, elements, chart) => {
+            if (!elements.length) return;
+            const i = elements[0].index;
+            const loc = locL[i];
+            const days = String(Math.min(30, Math.max(7, data.trend_days || 14)));
+            window.location = jobsLink({ ...encodeLoc(loc), days });
+          }
+        }
+      });
+      charts.push(ch);
+    }
+
+    const tL = data.type_labels || [];
+    const tC = data.type_counts || [];
+    if (tL.length) {
+      const ctxT = document.getElementById('chartType');
+      const ch = new Chart(ctxT, {
+        type: 'doughnut',
+        data: {
+          labels: tL,
+          datasets: [{ data: tC, backgroundColor: blues, borderWidth: 1, borderColor: '#fff' }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom' } },
+          onClick: (e, elements) => {
+            if (!elements.length) return;
+            const i = elements[0].index;
+            const src = tL[i];
+            const days = String(Math.min(30, Math.max(7, data.trend_days || 14)));
+            window.location = jobsLink({ ...encodeSrc(src), days });
+          }
+        }
+      });
+      charts.push(ch);
+    }
+  }
+
+  async function loadStats(days, silent) {
+    const st = document.getElementById('stats-status');
+    if (!silent && st) st.textContent = 'Loading…';
+    try {
+      const r = await fetch('/api/stats?days=' + encodeURIComponent(days));
+      if (!r.ok) throw new Error(String(r.status));
+      const data = await r.json();
+      renderAll(data);
+      if (st) st.textContent = 'Updated ' + new Date().toLocaleTimeString();
+      const sel = document.getElementById('stats-days');
+      if (sel) sel.value = String(data.trend_days || days);
+      const u = new URL(window.location.href);
+      u.searchParams.set('days', String(data.trend_days || days));
+      history.replaceState({}, '', u);
+    } catch (err) {
+      if (st) st.textContent = 'Failed to load stats: ' + err;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const boot = document.getElementById('stats-bootstrap');
+    let initial = { labels_days: [], counts_days: [], loc_labels: [], loc_counts: [], alert_pct: [], type_labels: [], type_counts: [], insights: {}, trend_days: 14 };
+    try {
+      if (boot && boot.textContent) initial = JSON.parse(boot.textContent);
+    } catch (e) {}
+    const sel = document.getElementById('stats-days');
+    if (sel) {
+      sel.value = String(initial.trend_days || 14);
+      sel.addEventListener('change', () => loadStats(sel.value, false));
+    }
+    document.getElementById('stats-refresh')?.addEventListener('click', () => loadStats(sel ? sel.value : '14', false));
+    document.getElementById('stats-autorefresh')?.addEventListener('change', (ev) => {
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      if (ev.target.checked) {
+        autoTimer = setInterval(() => loadStats(sel ? sel.value : '14', true), 90000);
+      }
+    });
+    renderAll(initial);
+  });
+})();
+</script>
+{% endblock %}

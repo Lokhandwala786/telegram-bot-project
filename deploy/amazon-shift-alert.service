@@ -1,0 +1,22 @@
+# Optional second service — shift watcher (Playwright, jobsatamazon session)
+# Only enable if you use: python -m app.shift_alert run
+# Requires data/amazon_shift_session.json from a one-time login.
+
+[Unit]
+Description=Amazon UK shift watcher (Playwright)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=amazonbot
+Group=amazonbot
+WorkingDirectory=/opt/amazon-bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/amazon-bot/.venv/bin/python -m app.shift_alert run
+Restart=always
+RestartSec=30
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

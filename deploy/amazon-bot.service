@@ -1,0 +1,25 @@
+# systemd unit — job poller + subscriber Telegram bot
+# Install: see deploy/DEPLOY_VPS.md
+
+[Unit]
+Description=Amazon UK Telegram job + subscriber bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=amazonbot
+Group=amazonbot
+WorkingDirectory=/opt/amazon-bot
+Environment=PYTHONUNBUFFERED=1
+# Optional: force config/db paths
+# Environment=CONFIG_PATH=/opt/amazon-bot/config.yaml
+# Environment=SQLITE_PATH=/opt/amazon-bot/data/jobs.db
+ExecStart=/opt/amazon-bot/.venv/bin/python -m app.main run
+Restart=always
+RestartSec=15
+# Playwright/Chromium can use a lot of RAM on small VPS
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target
