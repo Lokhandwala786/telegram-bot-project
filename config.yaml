@@ -7,9 +7,9 @@ sources:
   # Replace/add URLs as needed. Keep them public (no employee-only systems).
   urls:
     # Targeted Amazon Jobs searches (fast HTTP polling)
-    - "https://www.amazon.jobs/en/search?country=GBR&base_query=warehouse&loc_query=Coventry%2C%20UK"
-    - "https://www.amazon.jobs/en/search?country=GBR&base_query=warehouse&loc_query=Northampton%2C%20UK"
-    - "https://www.amazon.jobs/en/search?country=GBR&base_query=warehouse&loc_query=Derby%2C%20UK"
+    - "https://www.amazon.jobs/en/search?country=GBR&base_query=warehouse&normalized_location[]=Coventry%2C%20England%2C%20GBR"
+    - "https://www.amazon.jobs/en/search?country=GBR&base_query=warehouse&normalized_location[]=Northampton%2C%20England%2C%20GBR"
+    - "https://www.amazon.jobs/en/search?country=GBR&base_query=warehouse&normalized_location[]=Derby%2C%20England%2C%20GBR"
 
     # Optional: jobsatamazon.co.uk detail pages (Playwright rendering)
     - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000449"
@@ -17,6 +17,7 @@ sources:
     - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000214"
     # Nottingham/Mansfield (warehouse operative)
     - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000340"
+    - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000505"
 
 filters:
   # Midlands / adjacent UK warehouse areas plus Nottingham–Mansfield.
@@ -28,6 +29,7 @@ filters:
     - "Mansfield"
     - "Rugby"
     - "Leicester"
+    - "Birmingham"
 
   # Amazon warehouse/hourly style keywords (case-insensitive).
   title_keywords_any:

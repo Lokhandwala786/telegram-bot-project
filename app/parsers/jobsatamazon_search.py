@@ -98,13 +98,16 @@ class JobsAtAmazonSearchParser:
             return None
 
         text = normalize_whitespace(soup.get_text(" ", strip=True))
-        if not text or "loading" in text.casefold():
+        if not text:
             return None
 
         h1 = soup.find(["h1", "h2"])
         title = normalize_whitespace(h1.get_text(" ", strip=True)) if h1 else None
         if title and len(title) < _TITLE_MIN_LEN:
             title = None
+
+        if not title and "loading" in text.casefold():
+            return None
 
         job_id = _extract_job_id(source_url) or _extract_job_id(text)
 
