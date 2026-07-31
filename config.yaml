@@ -18,6 +18,8 @@ sources:
     # Nottingham/Mansfield (warehouse operative)
     - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000340"
     - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000505"
+    - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000562"
+    - "https://www.jobsatamazon.co.uk/app#/jobDetail?jobId=JOB-UK-0000000208"
 
 filters:
   # Midlands / adjacent UK warehouse areas plus Nottingham–Mansfield.
@@ -30,6 +32,10 @@ filters:
     - "Rugby"
     - "Leicester"
     - "Birmingham"
+    - "London"
+    - "Baillieston"
+    - "Motherwell"
+    - "Glasgow"
 
   # Amazon warehouse/hourly style keywords (case-insensitive).
   title_keywords_any:
