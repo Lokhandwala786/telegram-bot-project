@@ -81,7 +81,7 @@ class TelegramNotifier:
         stop=stop_after_attempt(4),
         reraise=True,
     )
-    async def send(self, msg: TelegramMessage) -> None:
+    async def send(self, msg: TelegramMessage) -> int:
         if not self._client:
             raise RuntimeError("TelegramNotifier must be used as an async context manager")
 
@@ -107,6 +107,38 @@ class TelegramNotifier:
         data = resp.json()
         if not data.get("ok", False):
             raise httpx.TransportError(f"Telegram API error: {data}")
+        return int(data["result"]["message_id"])
+
+    @retry(
+        retry=retry_if_exception(retry_condition),
+        wait=wait_retry_after_or_exponential(initial=0.5, max_wait=10.0),
+        stop=stop_after_attempt(4),
+        reraise=True,
+    )
+    async def edit(self, message_id: int, new_text: str) -> None:
+        if not self._client:
+            raise RuntimeError("TelegramNotifier must be used as an async context manager")
+
+        url = f"https://api.telegram.org/bot{self._bot_token}/editMessageText"
+        payload = {
+            "chat_id": self._chat_id,
+            "message_id": message_id,
+            "text": new_text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        resp = await self._client.post(url, data=payload)
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            try:
+                err_data = e.response.json()
+                desc = err_data.get("description", "")
+                if desc:
+                    log.error("Telegram API error response (edit): %s", desc)
+            except Exception:
+                pass
+            raise e
 
     @retry(
         retry=retry_if_exception(retry_condition),

@@ -215,18 +215,18 @@ def enrich_listing(job: JobListing, net: NetworkExtract) -> JobListing:
     first_day = net.first_day or job.posted_date_text
 
     if net.employment_type:
-        meta.setdefault("Employment type", net.employment_type)
+        meta["Employment type"] = net.employment_type
     if net.schedule and not is_garbled_scraped_line(net.schedule):
-        meta.setdefault("Schedule", normalize_whitespace(net.schedule))
+        meta["Schedule"] = normalize_whitespace(net.schedule)
 
     if net.hours_per_week:
-        meta.setdefault("Hours/Week", net.hours_per_week)
+        meta["Hours/Week"] = net.hours_per_week
     if net.description:
         cleaned = clean_description_plain(net.description)
         if cleaned:
             meta["Description"] = cleaned[:2000]
     if net.openings:
-        meta.setdefault("Openings", net.openings)
+        meta["Openings"] = net.openings
 
     if net.apply_enabled is not None:
         meta["apply_enabled"] = "true" if net.apply_enabled else "false"
@@ -234,9 +234,9 @@ def enrich_listing(job: JobListing, net: NetworkExtract) -> JobListing:
         # Prefer API apply URL over any DOM guess so Telegram "Apply" taps go to the real flow.
         meta["Apply link"] = net.apply_url
     if net.job_status:
-        meta.setdefault("Job status", net.job_status)
+        meta["Job status"] = net.job_status
     if net.postcode:
-        meta.setdefault("Postcode", net.postcode)
+        meta["Postcode"] = net.postcode
 
     if meta.get("Description"):
         c = clean_description_plain(meta["Description"])

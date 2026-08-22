@@ -5,6 +5,7 @@ import asyncio
 import logging
 import sys
 import httpx
+import json
 
 from collections import Counter
 from pathlib import Path
@@ -186,35 +187,36 @@ def _fmt(
 
     loc_a = location or ""
     wa = work_address or ""
+    postcode_suffix = f" {postcode}" if postcode else ""
+
     if loc_a and wa and normalize_whitespace(loc_a.casefold()) == normalize_whitespace(wa.casefold()):
-        blocks.append(f"📍 <b>Location:</b> {esc(loc_a)}")
+        blocks.append(f"📍 {esc(loc_a)}{esc(postcode_suffix)}")
     else:
         if loc_a:
-            blocks.append(f"📍 <b>Location:</b> {esc(loc_a)}")
+            blocks.append(f"📍 {esc(loc_a)}{esc(postcode_suffix)}")
         if wa and normalize_whitespace(wa.casefold()) != normalize_whitespace(loc_a.casefold()):
             blocks.append(f"📬 <b>Work address:</b> {esc(wa)}")
 
-    blocks.append(f"🏷️ <b>Title:</b> {title_line}")
+    blocks.append(f"🏷️ {title_line}")
     if employment:
-        blocks.append(f"💼 <b>Type:</b> {esc(employment)}")
+        blocks.append(f"💼 {esc(employment)}")
     if description:
         blocks.append(f"💬 <b>Summary:</b> {esc(description)}")
     if pay_display:
-        blocks.append(f"💰 <b>Pay:</b> {esc(pay_display)}")
+        blocks.append(f"💰 {esc(pay_display)}")
     if first_day:
-        blocks.append(f"📅 <b>First day:</b> {esc(first_day)}")
+        blocks.append(f"📅 First Day: {esc(first_day)}")
     if schedule:
-        blocks.append(f"⏰ <b>Schedule:</b> {esc(schedule)}")
+        blocks.append(f"⏰ Schedule: {esc(schedule)}")
     if hours:
-        blocks.append(f"⏲️ <b>Weekly hours:</b> {esc(hours)}")
-    if postcode:
-        blocks.append(f"📮 <b>Postcode:</b> {esc(postcode)}")
+        blocks.append(f"🕐 Hours/Week: {esc(hours)}")
     if job_status_m:
-        blocks.append(f"📋 <b>Listing:</b> {esc(job_status_m)}")
-    blocks.append(f"🆕 <b>Update:</b> {esc(status_line)}")
-    blocks.append(f"🕰️ <b>Time:</b> {esc(format_dt(alert_at, tz_name))}")
+        blocks.append(f"📋 Listing: {esc(job_status_m)}")
+    blocks.append(f"🆕 Update: {esc(status_line)}")
+    blocks.append(f"🕰️ Time: {esc(format_dt(alert_at, tz_name))}")
     if status == "updated" and (alert_at - first_tracked).total_seconds() > 90:
-        blocks.append(f"📌 <b>Listed since:</b> {esc(format_dt(first_tracked, tz_name))}")
+        blocks.append(f"📌 Listed since: {esc(format_dt(first_tracked, tz_name))}")
+    blocks.append("")
     blocks.append(f'<a href="{href_esc(job.url)}">{esc(job.url)}</a>')
     return "\n".join(blocks)
 
@@ -269,6 +271,7 @@ async def poll_once(settings: Settings) -> int:
         return 0
 
     sent = 0
+    polled_successfully: set[str] = set()
     sem = asyncio.Semaphore(max(1, settings.http_concurrency))
 
     async with HttpFetcher(timeout_seconds=settings.http_timeout_seconds) as fetcher:
@@ -311,9 +314,10 @@ async def poll_once(settings: Settings) -> int:
                             ts = now_utc().strftime("%Y%m%dT%H%M%SZ")
                             (snapshots_dir / f"parse_zero_jobsatamazon_{ts}.html").write_text(html, encoding="utf-8")
                             log.warning("jobsatamazon parser returned 0 jobs; snapshot saved.")
+                        polled_successfully.add(source_url)
                         return jobs
 
-                    return await _fetch_parse_one(
+                    res = await _fetch_parse_one(
                         fetcher=fetcher,
                         parser=parser,
                         url=source_url,
@@ -322,6 +326,8 @@ async def poll_once(settings: Settings) -> int:
                         snapshots_dir=snapshots_dir,
                         save_snapshots_on_parse_issues=file_cfg.behavior.save_snapshots_on_parse_issues,
                     )
+                    polled_successfully.add(source_url)
+                    return res
                 except Exception as e:
                     if file_cfg.behavior.save_snapshots_on_parse_issues:
                         snapshots_dir.mkdir(parents=True, exist_ok=True)
@@ -387,7 +393,8 @@ async def poll_once(settings: Settings) -> int:
                 async with TelegramNotifier(
                     bot_token=token, chat_id=cid, timeout_seconds=settings.http_timeout_seconds
                 ) as t:
-                    await t.send(TelegramMessage(text=text, disable_web_page_preview=False))
+                    msg_id = await t.send(TelegramMessage(text=text, disable_web_page_preview=False))
+                await asyncio.to_thread(store.record_sent_alert, _job_key(job), cid, msg_id, now)
                 sent += 1
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
@@ -429,6 +436,7 @@ async def poll_once(settings: Settings) -> int:
             posted_date_text=job.posted_date_text,
             content_hash=chash,
             now_utc=now,
+            raw_metadata_json=json.dumps(job.raw_metadata),
         )
 
         if up.status == "new":
@@ -500,6 +508,87 @@ async def poll_once(settings: Settings) -> int:
             log.info("[poll] Purged %d old job(s) from database", purged)
     except Exception:
         log.exception("Failed to purge old jobs from database")
+
+    # Check for jobs that are no longer available (offline)
+    if not settings.dry_run and token:
+        try:
+            active_alerts = await asyncio.to_thread(store.get_active_alerts)
+            current_active_keys = set()
+            for job in all_jobs:
+                decision = passes_filters(job, file_cfg.filters)
+                if decision.allowed:
+                    if not _suppress_telegram_for_apply_policy(job, file_cfg.behavior):
+                        current_active_keys.add(_job_key(job))
+
+            for alert in active_alerts:
+                job_key = alert["job_key"]
+                db_job = await asyncio.to_thread(store.get_job_by_key, job_key)
+                if not db_job:
+                    continue
+                
+                src_url = db_job.source_url
+                if src_url in polled_successfully:
+                    if job_key not in current_active_keys:
+                        row = await asyncio.to_thread(
+                            lambda: store._conn.execute("SELECT first_seen_utc FROM jobs WHERE key = ?", (job_key,)).fetchone()
+                        )
+                        first_seen_val = None
+                        if row:
+                            try:
+                                first_seen_val = datetime.fromisoformat(str(row["first_seen_utc"]).replace("Z", "+00:00"))
+                            except Exception:
+                                pass
+                        
+                        first_seen_utc = first_seen_val or now
+                        
+                        orig_text = _fmt(
+                            db_job,
+                            tz_name=file_cfg.project.timezone,
+                            first_seen_utc=first_seen_utc,
+                            alert_at_utc=now,
+                            status="new",
+                            alert_header=file_cfg.project.telegram_alert_header,
+                        )
+                        
+                        try:
+                            sent_at = datetime.fromisoformat(alert["sent_at_utc"].replace("Z", "+00:00"))
+                            if sent_at.tzinfo is None:
+                                sent_at = sent_at.replace(tzinfo=UTC)
+                            else:
+                                sent_at = sent_at.astimezone(UTC)
+                            duration_secs = int((now - sent_at).total_seconds())
+                        except Exception:
+                            duration_secs = 0
+                            
+                        if duration_secs < 60:
+                            dur_str = f"{max(1, duration_secs)} seconds"
+                        elif duration_secs < 3600:
+                            dur_str = f"{max(1, duration_secs // 60)} min"
+                        else:
+                            hrs = duration_secs // 3600
+                            mins = (duration_secs % 3600) // 60
+                            if mins > 0:
+                                dur_str = f"{hrs} hr {mins} min"
+                            else:
+                                dur_str = f"{hrs} hour{'s' if hrs > 1 else ''}"
+                                
+                        new_text = f"{orig_text}\n\n❌ No longer available (was live for {dur_str})"
+                        
+                        chat_id = alert["chat_id"]
+                        msg_id = alert["message_id"]
+                        
+                        try:
+                            async with TelegramNotifier(
+                                bot_token=token, chat_id=chat_id, timeout_seconds=settings.http_timeout_seconds
+                            ) as t:
+                                await t.edit(message_id=msg_id, new_text=new_text)
+                            log.info("Edited alert message for job %s to mark as offline (live for %s)", job_key, dur_str)
+                        except Exception as edit_err:
+                            log.warning("Failed to edit alert message for job %s: %s", job_key, edit_err)
+                            
+                        await asyncio.to_thread(store.delete_sent_alert, job_key, chat_id)
+        except Exception:
+            log.exception("Error checking/processing offline job alerts")
 
     store.close()
     return sent

@@ -99,6 +99,11 @@ class SqliteStore:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_last_seen ON jobs(last_seen_utc)")
+        cur.execute("PRAGMA table_info(jobs)")
+        cols = {str(row[1]) for row in cur.fetchall()}
+        if "raw_metadata_json" not in cols:
+            cur.execute("ALTER TABLE jobs ADD COLUMN raw_metadata_json TEXT")
+            self._conn.commit()
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS subscribers (
@@ -1322,6 +1327,7 @@ class SqliteStore:
         posted_date_text: str | None,
         content_hash: str,
         now_utc: datetime,
+        raw_metadata_json: str | None = None,
     ) -> UpsertResult:
         cur = self._conn.cursor()
         row = cur.execute("SELECT content_hash, first_seen_utc FROM jobs WHERE key = ?", (key,)).fetchone()
@@ -1345,8 +1351,8 @@ class SqliteStore:
                 INSERT INTO jobs(
                   key, job_id, url, source, source_url, title, location, pay_gbp_per_hour,
                   pay_text, expected_pay_text, shift, posted_date_text,
-                  content_hash, first_seen_utc, last_seen_utc
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                  content_hash, first_seen_utc, last_seen_utc, raw_metadata_json
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     key,
@@ -1364,6 +1370,7 @@ class SqliteStore:
                     content_hash,
                     now_utc.isoformat(),
                     now_utc.isoformat(),
+                    raw_metadata_json,
                 ),
             )
             self._conn.commit()
@@ -1391,7 +1398,8 @@ class SqliteStore:
                   shift=?,
                   posted_date_text=?,
                   content_hash=?,
-                  last_seen_utc=?
+                  last_seen_utc=?,
+                  raw_metadata_json=?
                 WHERE key=?
                 """,
                 (
@@ -1408,6 +1416,7 @@ class SqliteStore:
                     posted_date_text,
                     content_hash,
                     now_utc.isoformat(),
+                    raw_metadata_json,
                     key,
                 ),
             )
@@ -1602,5 +1611,82 @@ class SqliteStore:
         cur = self._conn.execute("DELETE FROM jobs WHERE last_seen_utc < ?", (threshold,))
         self._conn.commit()
         return int(cur.rowcount or 0)
+
+    def get_job_by_key(self, key: str) -> Any | None:
+        from app.models.job import JobListing
+        cur = self._conn.execute("SELECT * FROM jobs WHERE key = ?", (key,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        raw_meta = {}
+        # Safely handle raw_metadata_json if column exists in the row
+        if "raw_metadata_json" in row.keys() and row["raw_metadata_json"]:
+            try:
+                raw_meta = json.loads(str(row["raw_metadata_json"]))
+            except Exception:
+                pass
+        return JobListing(
+            source=str(row["source"]),
+            source_url=str(row["source_url"]),
+            job_id=str(row["job_id"]) if row["job_id"] else None,
+            url=str(row["url"]),
+            title=str(row["title"]) if row["title"] else None,
+            location=str(row["location"]) if row["location"] else None,
+            pay_gbp_per_hour=float(row["pay_gbp_per_hour"]) if row["pay_gbp_per_hour"] is not None else None,
+            pay_text=str(row["pay_text"]) if row["pay_text"] else None,
+            expected_pay_text=str(row["expected_pay_text"]) if row["expected_pay_text"] else None,
+            shift=str(row["shift"]) if row["shift"] else None,
+            posted_date_text=str(row["posted_date_text"]) if row["posted_date_text"] else None,
+            raw_metadata=raw_meta,
+        )
+
+    def _ensure_sent_alerts_schema(self) -> None:
+        cur = self._conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sent_alerts (
+              job_key TEXT,
+              chat_id TEXT,
+              message_id INTEGER NOT NULL,
+              sent_at_utc TEXT NOT NULL,
+              PRIMARY KEY (job_key, chat_id)
+            )
+            """
+        )
+        self._conn.commit()
+
+    def record_sent_alert(self, job_key: str, chat_id: str, message_id: int, now_utc: datetime) -> None:
+        self._ensure_sent_alerts_schema()
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO sent_alerts (job_key, chat_id, message_id, sent_at_utc)
+            VALUES (?, ?, ?, ?)
+            """,
+            (job_key, chat_id, int(message_id), now_utc.isoformat()),
+        )
+        self._conn.commit()
+
+    def get_active_alerts(self) -> list[dict[str, Any]]:
+        self._ensure_sent_alerts_schema()
+        cur = self._conn.execute(
+            "SELECT job_key, chat_id, message_id, sent_at_utc FROM sent_alerts"
+        )
+        out = []
+        for r in cur.fetchall():
+            out.append({
+                "job_key": str(r["job_key"]),
+                "chat_id": str(r["chat_id"]),
+                "message_id": int(r["message_id"]),
+                "sent_at_utc": str(r["sent_at_utc"]),
+            })
+        return out
+
+    def delete_sent_alert(self, job_key: str, chat_id: str) -> None:
+        self._ensure_sent_alerts_schema()
+        self._conn.execute(
+            "DELETE FROM sent_alerts WHERE job_key = ? AND chat_id = ?",
+            (job_key, chat_id),
+        )
+        self._conn.commit()
 
 
