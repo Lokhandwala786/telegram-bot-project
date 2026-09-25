@@ -150,10 +150,18 @@ class PlaywrightFetcher:
         try:
             await page.wait_for_function(
                 "() => {"
-                "  const t = (document.getElementById('root')?.innerText || '').toLowerCase();"
-                "  return t.length > 30 && !t.includes('loading');"
+                "  const h = document.querySelector('h1, h2');"
+                "  if (h && (h.innerText || '').trim().length >= 6) {"
+                "    const ht = (h.innerText || '').toLowerCase();"
+                "    if (!ht.includes('loading')) return true;"
+                "  }"
+                "  const t = (document.getElementById('root')?.innerText || document.body?.innerText || '').toLowerCase();"
+                "  if (t.includes('no longer available') || t.includes('job not found') || t.includes('not available for application') || t.includes('this position has been filled')) {"
+                "    return true;"
+                "  }"
+                "  return false;"
                 "}",
-                timeout=self._nav_timeout_ms,
+                timeout=min(self._nav_timeout_ms, 25_000),
             )
         except Exception:
             pass

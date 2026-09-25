@@ -5,17 +5,60 @@ import re
 from bs4 import BeautifulSoup
 
 from app.models.job import JobListing
-from app.utils.text import canonicalize_url, normalize_whitespace
+from app.utils.text import canonicalize_url, is_garbled_scraped_line, normalize_whitespace
 
 
 _TITLE_MIN_LEN = 6
 _JOB_ID_RE = re.compile(r"(?:jobId=|job_id=|/jobs/)([A-Za-z0-9-]+)", re.IGNORECASE)
-_KV_RE = re.compile(r"\b([A-Za-z][A-Za-z ]{1,30}):\s*([^|]{1,80})")
-_WORK_ADDRESS_RE = re.compile(r"\bWork address:\s*((?:(?!Type:|Duration:|Pay rate:|Location|See what).){2,120})", re.IGNORECASE)
-_PAY_RATE_RE = re.compile(r"\bPay rate:\s*((?:(?!Type:|Duration:|Location|Work address:).){1,40})", re.IGNORECASE)
-_TYPE_RE = re.compile(r"\bType:\s*((?:(?!Duration:|Pay rate:|Location|Work address:).){1,40})", re.IGNORECASE)
-_DURATION_RE = re.compile(r"\bDuration:\s*((?:(?!Type:|Pay rate:|Location|Work address:).){1,40})", re.IGNORECASE)
-_NOT_AVAILABLE_RE = re.compile(r"\bnot available for application\b", re.IGNORECASE)
+_KV_RE = re.compile(r"\b([A-Za-z][A-Za-z /]{1,30}):\s*([^|]{1,80})")
+_WORK_ADDRESS_RE = re.compile(r"\bWork address:\s*((?:(?!Type:|Duration:|Pay rate:|Location|See what|Apply|Share|Similar).){2,120})", re.IGNORECASE)
+_PAY_RATE_RE = re.compile(r"\bPay rate:\s*((?:(?!Type:|Duration:|Location|Work address:|See what|Apply|Share|Similar).){1,40})", re.IGNORECASE)
+_TYPE_RE = re.compile(r"\bType:\s*((?:(?!Duration:|Pay rate:|Location|Work address:|See what|Apply|Share|Similar).){1,40})", re.IGNORECASE)
+_DURATION_RE = re.compile(r"\bDuration:\s*((?:(?!Type:|Pay rate:|Location|Work address:|See what|Apply|Share|Similar).){1,40})", re.IGNORECASE)
+_NOT_AVAILABLE_RE = re.compile(
+    r"\b(?:"
+    r"not available for application|"
+    r"no longer available|"
+    r"no longer accepting applications|"
+    r"job not found|"
+    r"doesn't have available shifts|"
+    r"does not have available shifts|"
+    r"no available shifts|"
+    r"no shifts available|"
+    r"currently no shifts|"
+    r"all shifts are currently filled|"
+    r"this position has been filled|"
+    r"check back later for new shifts|"
+    r"please choose another job below"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+_ALLOWED_DETAIL_KEYS: dict[str, str] = {
+    "work address": "Work address",
+    "employment type": "Employment type",
+    "schedule": "Schedule",
+    "hours/week": "Hours/Week",
+    "openings": "Openings",
+    "pay rate": "Pay rate",
+    "description": "Description",
+    "job status": "Job status",
+    "postcode": "Postcode",
+}
+
+
+def _clean_val(v: str | None) -> str | None:
+    if not v:
+        return None
+    s = normalize_whitespace(v).strip(" -|,")
+    if not s or s.upper() in ("N/A", "TBC", "—", "-"):
+        return None
+    if "loading" in s.lower():
+        return None
+    if is_garbled_scraped_line(s):
+        return None
+    return s
 
 
 class JobsAtAmazonSearchParser:
@@ -103,58 +146,88 @@ class JobsAtAmazonSearchParser:
 
         h1 = soup.find(["h1", "h2"])
         title = normalize_whitespace(h1.get_text(" ", strip=True)) if h1 else None
-        if title and len(title) < _TITLE_MIN_LEN:
-            title = None
+        if title:
+            tl = title.casefold()
+            if (
+                len(title) < _TITLE_MIN_LEN
+                or "loading" in tl
+                or "jobs found" in tl
+                or "error" in tl
+                or "no recommendations" in tl
+                or re.search(r"^\d+\s+jobs?\b", tl)
+            ):
+                title = None
 
-        if not title and "loading" in text.casefold():
+        if not title:
             return None
 
         job_id = _extract_job_id(source_url) or _extract_job_id(text)
 
         # Extract key-value fields commonly shown on the detail page.
-        work_address = _first_match(_WORK_ADDRESS_RE, text)
-        pay_rate = _first_match(_PAY_RATE_RE, text)
-        jtype = _first_match(_TYPE_RE, text)
-        duration = _first_match(_DURATION_RE, text)
+        work_address = _clean_val(_first_match(_WORK_ADDRESS_RE, text))
+        pay_rate = _clean_val(_first_match(_PAY_RATE_RE, text))
+        jtype = _clean_val(_first_match(_TYPE_RE, text))
+        duration = _clean_val(_first_match(_DURATION_RE, text))
 
         location = work_address or _guess_uk_location(text)
 
         raw_meta: dict[str, str] = {}
         for m in _KV_RE.finditer(text):
-            k = normalize_whitespace(m.group(1))
-            v = normalize_whitespace(m.group(2))
-            if k and v and len(k) <= 32 and len(v) <= 120:
-                raw_meta.setdefault(k, v)
+            raw_k = normalize_whitespace(m.group(1)).casefold()
+            if raw_k in _ALLOWED_DETAIL_KEYS:
+                canonical_k = _ALLOWED_DETAIL_KEYS[raw_k]
+                cleaned_v = _clean_val(m.group(2))
+                if cleaned_v and len(cleaned_v) <= 120:
+                    raw_meta.setdefault(canonical_k, cleaned_v)
 
         shift = None
-        shift_parts = [p for p in [jtype, duration] if p and p.upper() != "N/A"]
+        shift_parts = [p for p in [jtype, duration] if p]
         if shift_parts:
             shift = " / ".join(shift_parts)
 
-        pay_text = None
-        if pay_rate and pay_rate.upper() != "N/A":
-            pay_text = pay_rate
+        pay_text = pay_rate
+
+        if work_address:
+            raw_meta["Work address"] = work_address
+        if pay_text:
+            raw_meta["Pay rate"] = pay_text
+        if shift and "Schedule" not in raw_meta:
+            raw_meta["Schedule"] = shift
 
         # Apply enabled detection:
-        # - disabled Apply button (aria-disabled/disabled attribute), or
-        # - banner text "not available for application now"
-        apply_enabled = True
-        if _NOT_AVAILABLE_RE.search(text):
-            apply_enabled = False
-        else:
-            # Try DOM-based signals
+        # A job is ONLY available if:
+        # 1. No unavailable/no-shifts phrase is present in text
+        # 2. An active Apply or Select Shift button/link is found, and is NOT disabled
+        apply_enabled = False
+        if not _NOT_AVAILABLE_RE.search(text):
             for el in soup.find_all(["button", "a"]):
                 label = normalize_whitespace(el.get_text(" ", strip=True)).casefold()
-                if label == "apply":
-                    if el.has_attr("disabled"):
-                        apply_enabled = False
-                        break
-                    aria = str(el.get("aria-disabled") or "").strip().lower()
-                    if aria == "true":
-                        apply_enabled = False
+                if any(
+                    btn_word in label
+                    for btn_word in (
+                        "apply",
+                        "select shift",
+                        "choose shift",
+                        "start application",
+                        "book shift",
+                        "continue application",
+                    )
+                ):
+                    # Check for disabled attributes or classes
+                    is_dis = el.has_attr("disabled")
+                    aria_dis = str(el.get("aria-disabled") or "").strip().lower() == "true"
+                    classes = el.get("class") or []
+                    class_dis = (
+                        any("disabled" in str(c).lower() for c in classes)
+                        if isinstance(classes, list)
+                        else "disabled" in str(classes).lower()
+                    )
+                    if not (is_dis or aria_dis or class_dis):
+                        apply_enabled = True
                         break
 
         raw_meta["apply_enabled"] = "true" if apply_enabled else "false"
+
 
         return JobListing(
             source="jobsatamazon.co.uk",

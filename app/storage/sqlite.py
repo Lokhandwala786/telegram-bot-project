@@ -1654,22 +1654,48 @@ class SqliteStore:
             """
         )
         self._conn.commit()
+        cur.execute("PRAGMA table_info(sent_alerts)")
+        cols = {str(row[1]) for row in cur.fetchall()}
+        if "miss_count" not in cols:
+            cur.execute("ALTER TABLE sent_alerts ADD COLUMN miss_count INTEGER NOT NULL DEFAULT 0")
+            self._conn.commit()
 
     def record_sent_alert(self, job_key: str, chat_id: str, message_id: int, now_utc: datetime) -> None:
         self._ensure_sent_alerts_schema()
         self._conn.execute(
             """
-            INSERT OR REPLACE INTO sent_alerts (job_key, chat_id, message_id, sent_at_utc)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO sent_alerts (job_key, chat_id, message_id, sent_at_utc, miss_count)
+            VALUES (?, ?, ?, ?, 0)
+            ON CONFLICT(job_key, chat_id) DO UPDATE SET
+              message_id = excluded.message_id,
+              sent_at_utc = excluded.sent_at_utc,
+              miss_count = 0
             """,
             (job_key, chat_id, int(message_id), now_utc.isoformat()),
         )
         self._conn.commit()
 
+    def get_sent_alert(self, job_key: str, chat_id: str) -> dict[str, Any] | None:
+        self._ensure_sent_alerts_schema()
+        cur = self._conn.execute(
+            "SELECT job_key, chat_id, message_id, sent_at_utc, miss_count FROM sent_alerts WHERE job_key = ? AND chat_id = ?",
+            (job_key, chat_id),
+        )
+        r = cur.fetchone()
+        if r is None:
+            return None
+        return {
+            "job_key": str(r["job_key"]),
+            "chat_id": str(r["chat_id"]),
+            "message_id": int(r["message_id"]),
+            "sent_at_utc": str(r["sent_at_utc"]),
+            "miss_count": int(r["miss_count"] or 0),
+        }
+
     def get_active_alerts(self) -> list[dict[str, Any]]:
         self._ensure_sent_alerts_schema()
         cur = self._conn.execute(
-            "SELECT job_key, chat_id, message_id, sent_at_utc FROM sent_alerts"
+            "SELECT job_key, chat_id, message_id, sent_at_utc, miss_count FROM sent_alerts"
         )
         out = []
         for r in cur.fetchall():
@@ -1678,8 +1704,31 @@ class SqliteStore:
                 "chat_id": str(r["chat_id"]),
                 "message_id": int(r["message_id"]),
                 "sent_at_utc": str(r["sent_at_utc"]),
+                "miss_count": int(r["miss_count"] or 0),
             })
         return out
+
+    def increment_sent_alert_miss(self, job_key: str, chat_id: str) -> int:
+        self._ensure_sent_alerts_schema()
+        self._conn.execute(
+            "UPDATE sent_alerts SET miss_count = COALESCE(miss_count, 0) + 1 WHERE job_key = ? AND chat_id = ?",
+            (job_key, chat_id),
+        )
+        self._conn.commit()
+        cur = self._conn.execute(
+            "SELECT miss_count FROM sent_alerts WHERE job_key = ? AND chat_id = ?",
+            (job_key, chat_id),
+        )
+        row = cur.fetchone()
+        return int(row["miss_count"] or 0) if row else 0
+
+    def reset_sent_alert_miss(self, job_key: str) -> None:
+        self._ensure_sent_alerts_schema()
+        self._conn.execute(
+            "UPDATE sent_alerts SET miss_count = 0 WHERE job_key = ?",
+            (job_key,),
+        )
+        self._conn.commit()
 
     def delete_sent_alert(self, job_key: str, chat_id: str) -> None:
         self._ensure_sent_alerts_schema()

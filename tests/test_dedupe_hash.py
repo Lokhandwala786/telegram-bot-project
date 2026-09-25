@@ -56,6 +56,54 @@ def test_content_hash_changes_on_title_update() -> None:
     assert _content_hash(j1) != _content_hash(j2)
 
 
+def test_content_hash_ignores_irrelevant_meta_and_ordering() -> None:
+    meta_a = {
+        "apply_enabled": "true",
+        "Hours/Week": "40",
+        "Random Carousel Job Type": "Full Time",
+        "Another Unrelated Key": "123",
+    }
+    meta_b = {
+        "Hours/Week": "40",
+        "apply_enabled": "true",
+        "Different Carousel Job Type": "Part Time",
+    }
+    j1 = _job(job_id="JOB-123", raw_metadata=meta_a)
+    j2 = _job(job_id="JOB-123", raw_metadata=meta_b)
+    assert _content_hash(j1) == _content_hash(j2)
+
+
+def test_content_hash_changes_on_meaningful_meta_update() -> None:
+    j1 = _job(job_id="JOB-123", raw_metadata={"Hours/Week": "40", "apply_enabled": "true"})
+    j2 = _job(job_id="JOB-123", raw_metadata={"Hours/Week": "20", "apply_enabled": "true"})
+    assert _content_hash(j1) != _content_hash(j2)
+
+
+def test_sqlite_sent_alerts_miss_count_and_debounce(tmp_path: Path) -> None:
+    from app.storage.sqlite import SqliteStore
+
+    db = tmp_path / "sent_alerts.db"
+    s = SqliteStore(str(db))
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+
+    s.record_sent_alert("jid:job-1", "chat-1", 1001, now)
+    alert = s.get_sent_alert("jid:job-1", "chat-1")
+    assert alert is not None
+    assert alert["message_id"] == 1001
+    assert alert["miss_count"] == 0
+
+    miss1 = s.increment_sent_alert_miss("jid:job-1", "chat-1")
+    assert miss1 == 1
+    alert = s.get_sent_alert("jid:job-1", "chat-1")
+    assert alert["miss_count"] == 1
+
+    s.reset_sent_alert_miss("jid:job-1")
+    alert = s.get_sent_alert("jid:job-1", "chat-1")
+    assert alert["miss_count"] == 0
+
+    s.close()
+
+
 def test_sqlite_upsert_migrates_legacy_row_key_by_job_id(tmp_path: Path) -> None:
     from app.storage.sqlite import SqliteStore
 

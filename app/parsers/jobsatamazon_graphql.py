@@ -274,8 +274,13 @@ def network_extract_from_graphql_envelope(envelope: dict[str, Any]) -> NetworkEx
     ):
         return None
 
+    posting_status = safe_get(node, "postingStatus")
+    if isinstance(posting_status, str) and posting_status.strip().upper() in ("UNPOSTED", "CLOSED", "FILLED", "INACTIVE"):
+        apply_enabled = False
+
     js = safe_get(node, "jobStatus")
     job_status = js.strip() if isinstance(js, str) and js.strip() else None
+
 
     return NetworkExtract(
         title=title,
@@ -301,8 +306,11 @@ def parse_schedule_cards_extract(envelope: dict[str, Any]) -> NetworkExtract | N
     if not isinstance(data, dict):
         return None
     cards = data.get("scheduleCards")
+    if isinstance(cards, list) and len(cards) == 0:
+        return NetworkExtract(apply_enabled=False)
     if not isinstance(cards, list) or not cards:
         return None
+
 
     pays = []
     schedules = []
@@ -347,7 +355,9 @@ def parse_schedule_cards_extract(envelope: dict[str, Any]) -> NetworkExtract | N
         first_day=" / ".join(first_days) if first_days else None,
         hours_per_week=" / ".join(hours_list) if hours_list else None,
         pay=" / ".join(pays) if pays else None,
+        apply_enabled=True,
     )
+
 
 
 def best_graphql_extract(captures: list[Any]) -> NetworkExtract | None:
@@ -394,6 +404,7 @@ def best_graphql_extract(captures: list[Any]) -> NetworkExtract | None:
 
     if cards_extract:
         if best:
+            apply_en = cards_extract.apply_enabled if cards_extract.apply_enabled is not None else best.apply_enabled
             best = NetworkExtract(
                 title=best.title,
                 description=best.description,
@@ -404,7 +415,7 @@ def best_graphql_extract(captures: list[Any]) -> NetworkExtract | None:
                 pay=cards_extract.pay or best.pay,
                 location=best.location,
                 openings=best.openings or cards_extract.openings,
-                apply_enabled=best.apply_enabled,
+                apply_enabled=apply_en,
                 apply_url=best.apply_url,
                 job_status=best.job_status,
                 postcode=best.postcode,
@@ -412,6 +423,7 @@ def best_graphql_extract(captures: list[Any]) -> NetworkExtract | None:
             )
         else:
             best = cards_extract
+
 
     return best
 
